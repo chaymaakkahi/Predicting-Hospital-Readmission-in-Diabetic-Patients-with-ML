@@ -26,21 +26,19 @@ def preprocess_patient_input(data_dict):
     df['age_mid'] = df['age'].map(age_map).fillna(55)
     
     med_order = {'No': 0, 'Steady': 1, 'Up': 2, 'Down': -1}
-    
-    # ✅ FIX: Only look for medications that are actually in the user input
     all_possible_meds = ['metformin', 'insulin', 'glipizide', 'glyburide']
     med_cols_present = [c for c in all_possible_meds if c in df.columns]
     
     for col in med_cols_present:
         df[col] = df[col].map(med_order).fillna(0).astype(int)
         
-    # Calculate totals only using the meds we actually have
     if len(med_cols_present) > 0:
         df['n_active_meds'] = (df[med_cols_present] != 0).sum(axis=1)
         df['n_med_changes'] = df[med_cols_present].isin([2, -1]).sum(axis=1)
     else:
         df['n_active_meds'] = 0
         df['n_med_changes'] = 0
+        
     # 2. Categorical Encoding
     df['gender'] = df['gender'].map({'Female': 0, 'Male': 1}).fillna(0)
     df['change'] = df['change'].map({'No': 0, 'Ch': 1}).fillna(0)
@@ -49,14 +47,23 @@ def preprocess_patient_input(data_dict):
     # One-Hot Encoding
     df = pd.get_dummies(df, drop_first=True)
     
-    # 3. Align with Selected Features (No selector object needed!)
-    df_aligned = pd.DataFrame(0, index=df.index, columns=selected_features)
+    # 3. GET ALL FEATURES THE SCALER EXPECTS (This is the magic trick!)
+    # The scaler remembers every single column from the notebook training
+    all_scaler_features = scaler.feature_names_in_
+    
+    # Create a dataframe with ALL original columns, filling missing user inputs with 0
+    df_for_scaler = pd.DataFrame(0, index=df.index, columns=all_scaler_features)
     for col in df.columns:
-        if col in selected_features:
-            df_aligned[col] = df[col]
+        if col in all_scaler_features:
+            df_for_scaler[col] = df[col]
             
-    # 4. Scaling (Directly scale the aligned columns)
-    X_final = scaler.transform(df_aligned)
+    # 4. SCALE FIRST (Now the scaler is happy because it sees all columns)
+    X_scaled = scaler.transform(df_for_scaler)
+    
+    # 5. FEATURE SELECTION SECOND (Pick only the columns the model needs)
+    # Find the exact position of our selected features in the scaled array
+    feature_indices = [list(all_scaler_features).index(f) for f in selected_features]
+    X_final = X_scaled[:, feature_indices]
     
     return X_final
 
