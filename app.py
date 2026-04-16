@@ -26,15 +26,21 @@ def preprocess_patient_input(data_dict):
     df['age_mid'] = df['age'].map(age_map).fillna(55)
     
     med_order = {'No': 0, 'Steady': 1, 'Up': 2, 'Down': -1}
-    med_cols = ['metformin', 'insulin', 'glipizide', 'glyburide'] 
-    for col in med_cols:
-        if col in df.columns:
-            df[col] = df[col].map(med_order).fillna(0).astype(int)
-            
-    df['n_active_meds'] = (df[med_cols] != 0).sum(axis=1)
-    df['n_med_changes'] = df[med_cols].isin([2, -1]).sum(axis=1)
-    df['prior_visits'] = df['number_outpatient'] + df['number_emergency'] + df['number_inpatient']
     
+    # ✅ FIX: Only look for medications that are actually in the user input
+    all_possible_meds = ['metformin', 'insulin', 'glipizide', 'glyburide']
+    med_cols_present = [c for c in all_possible_meds if c in df.columns]
+    
+    for col in med_cols_present:
+        df[col] = df[col].map(med_order).fillna(0).astype(int)
+        
+    # Calculate totals only using the meds we actually have
+    if len(med_cols_present) > 0:
+        df['n_active_meds'] = (df[med_cols_present] != 0).sum(axis=1)
+        df['n_med_changes'] = df[med_cols_present].isin([2, -1]).sum(axis=1)
+    else:
+        df['n_active_meds'] = 0
+        df['n_med_changes'] = 0
     # 2. Categorical Encoding
     df['gender'] = df['gender'].map({'Female': 0, 'Male': 1}).fillna(0)
     df['change'] = df['change'].map({'No': 0, 'Ch': 1}).fillna(0)
