@@ -6,29 +6,27 @@ import joblib
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Readmission Predictor", page_icon="🏥", layout="centered")
 
-# --- LOAD ARTIFACTS ---
+# --- LOAD ARTIFACTS (Only the 3 files you have) ---
 @st.cache_resource
 def load_artifacts():
     model = joblib.load('best_model.pkl')
     scaler = joblib.load('scaler.pkl')
-    selector = joblib.load('selector.pkl')
     features = joblib.load('selected_features.pkl')
-    threshold = joblib.load('best_threshold.pkl')
-    return model, scaler, selector, features, threshold
+    return model, scaler, features
 
-model, scaler, selector, selected_features, best_threshold = load_artifacts()
+model, scaler, selected_features = load_artifacts()
 
-# --- PREPROCESSING FUNCTION (Mirrors your Notebook exactly) ---
+# --- PREPROCESSING FUNCTION ---
 def preprocess_patient_input(data_dict):
     df = pd.DataFrame([data_dict])
     
-    # 1. Feature Engineering (Age, Meds, Visits)
+    # 1. Feature Engineering
     age_map = {'[0-10)':5, '[10-20)':15, '[20-30)':25, '[30-40)':35, '[40-50)':45, 
                '[50-60)':55, '[60-70)':65, '[70-80)':75, '[80-90)':85, '[90-100)':95}
     df['age_mid'] = df['age'].map(age_map).fillna(55)
     
     med_order = {'No': 0, 'Steady': 1, 'Up': 2, 'Down': -1}
-    med_cols = ['metformin', 'insulin', 'glipizide', 'glyburide'] # Add more if needed
+    med_cols = ['metformin', 'insulin', 'glipizide', 'glyburide'] 
     for col in med_cols:
         if col in df.columns:
             df[col] = df[col].map(med_order).fillna(0).astype(int)
@@ -37,28 +35,22 @@ def preprocess_patient_input(data_dict):
     df['n_med_changes'] = df[med_cols].isin([2, -1]).sum(axis=1)
     df['prior_visits'] = df['number_outpatient'] + df['number_emergency'] + df['number_inpatient']
     
-    # 2. Categorical Encoding (Binary & Nominal)
+    # 2. Categorical Encoding
     df['gender'] = df['gender'].map({'Female': 0, 'Male': 1}).fillna(0)
     df['change'] = df['change'].map({'No': 0, 'Ch': 1}).fillna(0)
     df['diabetesMed'] = df['diabetesMed'].map({'No': 0, 'Yes': 1}).fillna(0)
     
-    # One-Hot Encoding (Must match training columns exactly)
+    # One-Hot Encoding
     df = pd.get_dummies(df, drop_first=True)
     
-    # 3. Align with Selected Features (Crucial Step)
-    # Create a dataframe with all zeros using the exact columns the model expects
+    # 3. Align with Selected Features (No selector object needed!)
     df_aligned = pd.DataFrame(0, index=df.index, columns=selected_features)
-    
-    # Update with the values we actually have from the user
     for col in df.columns:
         if col in selected_features:
             df_aligned[col] = df[col]
             
-    # 4. Scaling
-    X_scaled = scaler.transform(df_aligned)
-    
-    # 5. Feature Selection
-    X_final = selector.transform(X_scaled)
+    # 4. Scaling (Directly scale the aligned columns)
+    X_final = scaler.transform(df_aligned)
     
     return X_final
 
@@ -100,7 +92,6 @@ st.divider()
 
 # --- PREDICTION LOGIC ---
 if st.button("🔮 Predict Readmission Risk", type="primary", use_container_width=True):
-    # Gather inputs into dictionary
     input_data = {
         'age': age, 'gender': gender, 'race': race,
         'time_in_hospital': time_in_hospital, 'num_lab_procedures': num_lab_procedures,
@@ -111,14 +102,13 @@ if st.button("🔮 Predict Readmission Risk", type="primary", use_container_widt
     }
     
     try:
-        # Preprocess
         X_processed = preprocess_patient_input(input_data)
         
         # Predict Probability
         proba = model.predict_proba(X_processed)[0][1]
         
-        # Apply custom threshold found in Notebook Error Analysis
-        prediction = 1 if proba >= best_threshold else 0
+        # Use standard 0.50 threshold since we don't have the custom one
+        prediction = 1 if proba >= 0.50 else 0
         
         # Display Results
         st.subheader("Clinical Prediction")
@@ -130,7 +120,5 @@ if st.button("🔮 Predict Readmission Risk", type="primary", use_container_widt
             st.success(f"✅ LOW RISK: {proba*100:.1f}% probability of readmission < 30 days.")
             st.info("Recommendation: Standard discharge protocol.")
             
-        st.caption(f"*Note: Model uses a custom clinical threshold of {best_threshold:.2f} instead of standard 0.50 to minimize false negatives.*")
-        
     except Exception as e:
         st.error(f"An error occurred during prediction: {e}")
